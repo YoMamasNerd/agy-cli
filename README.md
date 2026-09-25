@@ -110,3 +110,17 @@ providers:
     api_key: "not-needed"
     base_url: "http://127.0.0.1:8000/v1"
 ```
+
+## LXC-127 Deployment (YoMamasNerd fork)
+
+```bash
+# Dateien nach LXC 127 (über PVE-Host):
+pct push 127 agy_api.py /root/.hermes/agy-api/agy_api.py --perms 644
+pct exec 127 -- systemctl restart agy-api
+
+# Optionaler API-Schutz: AGY_API_TOKEN in ~/.hermes/.env auf LXC 127 setzen.
+# Dann verlangt /v1/*: Authorization: Bearer <token>. Unset = offen (Homelab).
+```
+
+Lokale Änderungen vs. upstream `agy_api.py`: Pfade auf `/root/.hermes/...`,
+Gemini 3.6/3.7/3.8-Flash-Slug-Modelle, `0.0.0.0`-Binding, optionaler Bearer-Token.
