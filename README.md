@@ -1,21 +1,21 @@
-# Google Antigravity Pro & Hermes Bridge (`agy-cli`)
+# agy-cli — Antigravity CLI Integration Tools
 
-This repository provides tools and wrappers to integrate your official **Google Antigravity CLI** (`agy`) and active **Antigravity Pro subscription** (Google One AI Premium OAuth credentials) seamlessly with **Hermes Agent** and other developer environments.
+This repository provides tools and wrappers to integrate the official **Google Antigravity CLI** (`agy`) with an active **Antigravity Pro subscription** (Google One AI Premium OAuth credentials) into OpenAI-compatible clients, agent frameworks, and developer environments.
 
-No AI Studio API keys or developer registrations are needed; all requests are authenticated natively through your macOS Keychain token using the official CLI under the hood.
+No AI Studio API keys or developer registrations are needed; all requests are authenticated natively through your local OAuth token using the official CLI under the hood.
 
 ---
 
 ## Features
 
 1. **Transparent TTY Wrapper (`agy_wrapper.py`)**:
-   Prevents background/non-interactive calls (e.g. from Hermes) from hanging when the CLI expects standard input. Automatically redirects `stdin` to `/dev/null` in non-interactive sessions while preserving 100% of the interactive TUI.
+   Prevents background/non-interactive calls (e.g. from agent frameworks) from hanging when the CLI expects standard input. Automatically redirects `stdin` to `/dev/null` in non-interactive sessions while preserving 100% of the interactive TUI.
 2. **OpenAI-Compatible API Proxy (`agy_api.py`)**:
-   Exposes a local FastAPI/Uvicorn server hosting the standard `/v1/chat/completions` endpoint. It translates chat completion requests into the official `agy` command executions.
+   Exposes a local FastAPI/Uvicorn server hosting the standard `/v1/chat/completions` endpoint. It translates chat completion requests into official `agy` command executions — including streaming, thinking/reasoning extraction (`reasoning_content`), model mapping, per-session conversation persistence, and retries with real failure-reason surfacing (quota exhaustion, expired login) from per-run logs.
 3. **FastMCP Server (`agy_mcp.py`)**:
    Exposes the `ask_antigravity` tool to other agents via Model Context Protocol (MCP).
-4. **Persistent LaunchAgent daemon**:
-   A macOS plist template and setup script to run the API server persistently in the background.
+4. **Daemon/Service templates**:
+   `agy-daemon.sh` (remote-control daemon setup for Linux/macOS) and `agy-api.service` (systemd unit for the API proxy) for persistent background operation.
 
 ---
 
@@ -37,53 +37,32 @@ cp agy_wrapper.py ~/.local/bin/agy
 chmod +x ~/.local/bin/agy
 ```
 
-### 3. API Proxy Background Service (macOS)
-Since the `Desktop` directory is sandboxed on macOS, it is recommended to place the background script inside a non-protected folder like `~/.hermes/agy-api`:
+### 3. API Proxy Background Service (Linux)
+Place the proxy in a dedicated directory and set up a clean virtualenv:
+```bash
+mkdir -p ~/.hermes/agy-api
+cp agy_api.py ~/.hermes/agy-api/
+uv venv ~/.hermes/agy-api/.venv
+uv pip install fastapi uvicorn --python ~/.hermes/agy-api/.venv/bin/python
+```
 
-1. Copy the proxy code and setup a clean virtualenv:
-   ```bash
-   mkdir -p ~/.hermes/agy-api
-   cp agy_api.py ~/.hermes/agy-api/
-   uv venv ~/.hermes/agy-api/.venv
-   ~/.hermes/bin/uv pip install fastapi uvicorn --python ~/.hermes/agy-api/.venv/bin/python
-   ```
-2. Create the launcher script:
-   Write the following to `~/.hermes/agy-api/start_api.sh` and run `chmod +x`:
-   ```bash
-   #!/bin/bash
-   cd ~/.hermes/agy-api
-   export PATH="/Users/arielkurek/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-   export HOME="/Users/arielkurek"
-   exec .venv/bin/python -u agy_api.py
-   ```
-3. Register the LaunchAgent:
-   Place a plist file at `~/Library/LaunchAgents/com.antigravity.agy-api.plist`:
-   ```xml
-   <?xml version="1.0" encoding="UTF-8"?>
-   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-   <plist version="1.0">
-   <dict>
-       <key>Label</key>
-       <string>com.antigravity.agy-api</string>
-       <key>ProgramArguments</key>
-       <array>
-           <string>/Users/arielkurek/.hermes/agy-api/start_api.sh</string>
-       </array>
-       <key>RunAtLoad</key>
-       <true/>
-       <key>KeepAlive</key>
-       <true/>
-       <key>StandardOutPath</key>
-       <string>/Users/arielkurek/.hermes/logs/agy-api-stdout.log</string>
-       <key>StandardErrorPath</key>
-       <string>/Users/arielkurek/.hermes/logs/agy-api-stderr.log</string>
-   </dict>
-   </plist>
-   ```
-4. Load the daemon:
-   ```bash
-   launchctl load ~/Library/LaunchAgents/com.antigravity.agy-api.plist
-   ```
+Adapt `agy-api.service` to your paths and install it as a systemd unit:
+```bash
+cp agy-api.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now agy-api
+```
+
+The proxy binds to `0.0.0.0:8000` by default. If you expose it beyond localhost, set an API token (see below).
+
+For macOS, run the API via a LaunchAgent instead (see the upstream README history for a plist template).
+
+### 4. Optional: API Authentication
+Set `AGY_API_TOKEN` in the environment (e.g. `~/.hermes/.env`):
+```bash
+AGY_API_TOKEN=your-secret-token
+```
+When set, all `/v1/*` requests require `Authorization: Bearer <token>`; requests without it get a `401`. When unset, the proxy is open — fine for isolated lab networks, not for shared networks.
 
 ---
 
@@ -94,33 +73,28 @@ Test the completions server locally:
 ```bash
 curl http://127.0.0.1:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "Claude Sonnet 4.6 (Thinking)", "messages": [{"role": "user", "content": "Say Hello"}]}'
+  -d '{"model": "claude-sonnet-4.6", "messages": [{"role": "user", "content": "Say Hello"}]}'
 ```
 
-### Hermes Agent Config
-Add this to your `~/.hermes/config.yaml`:
+Available model slugs (see `map_model_name` in `agy_api.py`): `gemini-3.8-flash`, `gemini-3.7-flash`, `gemini-3.6-flash`, `gemini-3.1-pro`, `claude-sonnet-4.6`, `claude-opus-4.6`, `gpt-oss-120b`.
+
+### OpenAI-Compatible Client Config
+Point any OpenAI-compatible client (e.g. Hermes Agent, Open WebUI) at the proxy:
 ```yaml
-model:
-  default: "Claude Sonnet 4.6 (Thinking)"
-  provider: "custom"
-  base_url: "http://127.0.0.1:8000/v1"
-
-providers:
-  custom:
-    api_key: "not-needed"
-    base_url: "http://127.0.0.1:8000/v1"
+model: claude-sonnet-4.6
+provider: custom
+base_url: http://<proxy-host>:8000/v1
+api_key: <token if AGY_API_TOKEN is set, otherwise any string>
 ```
 
-## LXC-127 Deployment (YoMamasNerd fork)
+### Session Persistence
+Pass a `session_id` field in chat completion requests to reuse the same agy conversation across turns (multi-turn context). The proxy maps session IDs to agy conversation IDs automatically.
 
-```bash
-# Dateien nach LXC 127 (über PVE-Host):
-pct push 127 agy_api.py /root/.hermes/agy-api/agy_api.py --perms 644
-pct exec 127 -- systemctl restart agy-api
+---
 
-# Optionaler API-Schutz: AGY_API_TOKEN in ~/.hermes/.env auf LXC 127 setzen.
-# Dann verlangt /v1/*: Authorization: Bearer <token>. Unset = offen (Homelab).
-```
+## Notes on this fork
 
-Lokale Änderungen vs. upstream `agy_api.py`: Pfade auf `/root/.hermes/...`,
-Gemini 3.6/3.7/3.8-Flash-Slug-Modelle, `0.0.0.0`-Binding, optionaler Bearer-Token.
+- Linux-first paths (`~/.hermes/...` instead of macOS home directories)
+- Slug-style model IDs (no spaces) so strict model pickers accept them
+- Gemini 3.6/3.7/3.8 Flash model mappings
+- Optional bearer-token auth (`AGY_API_TOKEN`)
