@@ -103,6 +103,17 @@ class ThinkingParser:
 
 app = FastAPI(title="Antigravity Pro API Proxy")
 
+# Optional bearer-token auth: set AGY_API_TOKEN in ~/.hermes/.env to require
+# "Authorization: Bearer <token>" on /v1/* requests. Unset = open (homelab).
+AGY_API_TOKEN = os.environ.get("AGY_API_TOKEN", "")
+
+def require_auth(request: Request):
+    if not AGY_API_TOKEN:
+        return
+    auth = request.headers.get("authorization", "")
+    if auth != f"Bearer {AGY_API_TOKEN}":
+        raise HTTPException(status_code=401, detail="Invalid or missing bearer token")
+
 class ChatMessage(BaseModel):
     role: str
     content: Union[str, List[Dict[str, Any]]]
@@ -310,6 +321,7 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
+    require_auth(raw_request)
     try:
         raw_body = await raw_request.json()
         body_str = str(raw_body)
