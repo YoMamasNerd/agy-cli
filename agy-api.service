@@ -1,0 +1,13 @@
+[Unit]
+Description=agy OpenAI-compatible API proxy
+After=network.target
+
+[Service]
+ExecStart=/root/.hermes/agy-api/.venv/bin/python -u /root/.hermes/agy-api/agy_api.py
+Restart=always
+RestartSec=5
+Environment=HOME=/root
+Environment=PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target
