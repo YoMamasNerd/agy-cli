@@ -129,8 +129,8 @@ class ChatCompletionRequest(BaseModel):
     class Config:
         extra = "allow"
 
-SESSION_FILE = "/Users/arielkurek/.hermes/agy-api/sessions.json"
-AGY_RUN_LOG_DIR = "/Users/arielkurek/.hermes/logs/agy-runs"
+SESSION_FILE = "/root/.hermes/agy-api/sessions.json"
+AGY_RUN_LOG_DIR = "/root/.hermes/logs/agy-runs"
 
 # The agy CLI exits 0 with EMPTY stdout on fatal agent errors (quota
 # RESOURCE_EXHAUSTED, expired Antigravity login, ...). Each run gets its own
@@ -213,7 +213,7 @@ def save_session_mapping(session_id: str, agy_conv_id: str):
         print(f"Error writing session file: {e}", flush=True)
 
 def get_db_files() -> set:
-    db_dir = "/Users/arielkurek/.gemini/antigravity-cli/conversations"
+    db_dir = "/root/.gemini/antigravity-cli/conversations"
     if not os.path.exists(db_dir):
         return set()
     return set(glob.glob(os.path.join(db_dir, "*.db")))
@@ -233,7 +233,7 @@ def detect_and_save_session(session_id: Optional[str], before_files: set, starte
     else:
         # Fallback: only consider DBs touched during this request, otherwise a
         # concurrent request's conversation gets mapped to this session.
-        db_dir = "/Users/arielkurek/.gemini/antigravity-cli/conversations"
+        db_dir = "/root/.gemini/antigravity-cli/conversations"
         files = [
             f for f in glob.glob(os.path.join(db_dir, "*.db"))
             if os.path.getmtime(f) >= started_at - 1
@@ -257,14 +257,14 @@ def map_model_name(model_name: str, reasoning_effort: Optional[str]) -> str:
         else:
             return "Gemini 3.1 Pro (Low)"
 
-    # Gemini 3.5 Flash mapping
-    if "gemini 3.5 flash" in name.lower() or "gemini-3.5-flash" in name.lower():
-        if effort in ("high", "xhigh"):
-            return "Gemini 3.5 Flash (High)"
-        elif effort in ("low", "minimal"):
-            return "Gemini 3.5 Flash (Low)"
-        else:
-            return "Gemini 3.5 Flash (Medium)"
+    for fam in ("3.8", "3.7", "3.6"):
+        if f"gemini {fam} flash" in name.lower() or f"gemini-{fam}-flash" in name.lower():
+            if effort in ("high", "xhigh"):
+                return f"Gemini {fam} Flash (High)"
+            elif effort in ("low", "minimal"):
+                return f"Gemini {fam} Flash (Low)"
+            else:
+                return f"Gemini {fam} Flash (Medium)"
 
     # Claude Sonnet 4.6 mapping
     if "claude sonnet 4.6" in name.lower() or "claude-sonnet-4.6" in name.lower():
@@ -300,12 +300,15 @@ async def health():
 
 @app.get("/v1/models")
 async def list_models():
+    # Slug IDs (no spaces) — Hermes' model picker rejects model names with spaces
     models_list = [
-        "Gemini 3.5 Flash",
-        "Gemini 3.1 Pro",
-        "Claude Sonnet 4.6",
-        "Claude Opus 4.6",
-        "GPT-OSS 120B"
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
+        "gemini-3.1-pro",
+        "claude-sonnet-4.6",
+        "claude-opus-4.6",
+        "gpt-oss-120b",
     ]
     return {
         "object": "list",
@@ -323,11 +326,9 @@ async def list_models():
 async def chat_completions(request: ChatCompletionRequest, raw_request: Request):
     require_auth(raw_request)
     try:
-        raw_body = await raw_request.json()
-        body_str = str(raw_body)
-        print(f"RAW REQUEST BODY: {body_str[:1000]}... (truncated, total length: {len(body_str)})", flush=True)
-    except Exception as e:
-        print(f"ERROR reading raw body: {e}", flush=True)
+        await raw_request.json()
+    except Exception:
+        pass
     # Formulate the prompt from messages
     # We take the content of the last user message
     last_msg = request.messages[-1]
@@ -377,7 +378,7 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
         # Return a streamed response if requested
         async def stream_generator():
             chunk_id = f"chatcmpl-{int(time.time())}"
-            parser = ThinkingParser(debug_file="/Users/arielkurek/.hermes/logs/agy-api-debug.log")
+            parser = ThinkingParser(debug_file="/root/.hermes/logs/agy-api-debug.log")
             last_stderr = ""
             last_return_code = 0
 
@@ -413,7 +414,7 @@ async def chat_completions(request: ChatCompletionRequest, raw_request: Request)
                                 decoded_line = line.decode('utf-8', errors='replace')
                                 stderr_lines.append(decoded_line)
                                 try:
-                                    with open("/Users/arielkurek/.hermes/logs/agy-api-stderr-debug.log", "a") as f:
+                                    with open("/root/.hermes/logs/agy-api-stderr-debug.log", "a") as f:
                                         f.write(decoded_line)
                                 except Exception:
                                     pass
